@@ -1,0 +1,179 @@
+<?php
+
+function facturas_urgentes_cron() {
+
+  $contador = 0;
+  $contado = 0; 
+	
+	//Extraemos la fecha de todas las faccli que tenemos para buscar las que sean antiguas (>6 meses)
+  	$timestamp = db_select('field_data_field_fech_faccli','n')
+		->fields('n', array('field_fech_faccli_value','entity_id'))
+		->execute();
+	
+	//Aquí es donde encontramos las antiguas 
+  	While($times = $timestamp->fetchAssoc()){
+  		$tiempo_transcurrido = time() - $times['field_fech_faccli_value'];
+		
+  		if ($tiempo_transcurrido > (6 * 31 * 24 * 60 * 60)){	//6 meses * 31 días * 24 horas ...
+			$nids[] = $times['entity_id'];
+			$contado = count($nids);
+  		}		
+  	}
+	//drupal_set_message("facturas antiguas $contado");
+	
+	//Una vez extraidas las antiguas, de estas extraemos su código
+	$Codigos_facturas = db_select('node','n')
+		->fields('n', array('title', 'nid'))
+		->condition('nid', $nids, 'IN')
+		->execute();
+	
+	//Con cada código de faccli, buscamos si estas ya fueron guardadas como faccli_urgentes
+	While($facturas = $Codigos_facturas->fetchAssoc()){
+  		$codigo_factura = $facturas['title'];
+		//drupal_set_message("$codigo_factura");
+		
+		$factura_urgente = db_select('node','n')
+			->fields('n', array('nid'))
+			->condition('type', 'faccli_urgente')
+			->condition('title', $facturas['title'])
+			->execute();
+			
+		//Si no fueron guardadas como urgentes, lo hacemos ahora.
+		
+  		if (($factura_encontrada = $factura_urgente->fetchAssoc())){				
+			//drupal_set_message("creada factura $codigo_factura");
+		}else{
+			drupal_set_message("creada factura $codigo_factura");
+			facturas_urgentes_crear($facturas['nid']);
+		}	
+		
+	}
+	
+}
+
+function facturas_urgentes_borrar_cron() {
+
+  $contador = 0;
+  $contado = 0; 
+	
+	//Extraemos todas las facturas urgentes
+	$factura_urgente = db_select('node','n')
+			->fields('n', array('nid','title'))
+			->condition('type', 'faccli_urgente')
+			->execute();
+	
+	//buscamos si estas facturas siguen existiendo
+  	While($factura = $factura_urgente->fetchAssoc()){
+		
+		$codigo_factura = $factura['title'];
+		$nodo_factura = $factura['nid'];
+		
+		$Buscar_factura = db_select('node','n')
+			->fields('n', array('title', 'nid'))
+			->condition('title', $codigo_factura)
+			->condition('type', 'faccli')
+			->execute();
+	
+	//En el caso de que ya hayan sido eliminadas las borramos también de las urgentes	
+		if ($Factura_encontrada = $Buscar_factura->fetchAssoc()){
+			//No hacer nada
+			//drupal_set_message("buenaa tardee");
+		}else{		
+			facturas_urgentes_borrar_factura($nodo_factura);
+			drupal_set_message("$codigo_factura");
+		}
+		
+	}
+	
+}
+
+function facturas_urgentes_borrar_factura($nid){	
+	$header = array('field_num_equip_faccli_urgente', 'field_fech_faccli_urgente', 'field_num_faccli_urgente', 'field_descrip_faccli_urgente', 'field_nif_faccli_urgente', 'field_pryo_faccli_urgente', 'field_base_faccli_urgente', 'field_cuota_faccli_urgente', 'field_total_faccli_urgente', 'field_t_cobrado_urgente', 'field_pte_cobro_urgente');
+	$type = 'faccli_urgente';
+	$contador = 0;
+	$contado = 0;
+	
+		db_delete('node_access')
+			->condition('nid',$nid)
+			->execute();
+
+		db_delete('node_revision')
+			->condition('nid',$nid)
+			->execute();
+
+		db_delete('node')
+			->condition('nid',$nid)
+			->execute();
+	
+		for ($i = 0; $i < count($header); $i++){
+
+		db_delete("field_data_{$header[$i]}")
+			->condition('entity_id',$nid)
+			->execute();
+		}		
+		for ($i = 0; $i < count($header); $i++){
+
+		db_delete("field_revision_{$header[$i]}")
+			//->condition('entity_id',$nids[$contador])
+			->execute();		        
+		}
+}
+
+function facturas_urgentes_crear($nid){
+	
+	$header = array('field_num_equip_faccli', 'field_fech_faccli', 'field_num_faccli', 'field_descrip_faccli', 'field_nif_faccli', 'field_pryo_faccli', 'field_base_faccli', 'field_cuota_faccli', 'field_total_faccli', 'field_t_cobrado', 'field_pte_cobro');
+	
+	global $user;
+	
+	$node = new stdClass();
+ 	$node->uid = $user->uid;
+    $node->name = $user->name;
+    $node->type = 'faccli_urgente';
+	node_object_prepare($node);
+	$node->language = LANGUAGE_NONE;
+    $node->status = 1;
+	
+	$codigo_factura = db_select('node','n')
+		->fields('n', array('title'))
+		->condition('nid', $nid)
+		->execute();
+	$factura = $codigo_factura->fetchAssoc();
+	$codigo = $factura['title'];
+	$node->title = $codigo;
+	
+	
+	foreach ($header as $key) {
+	$select ="field_data_".$key;
+	$field = $key."_value";
+	$datos_factura = db_select($select,'n')
+		->fields('n', array($field))
+		->condition('entity_id', $nid)
+		->execute();	
+	$datos = $datos_factura->fetchAssoc();
+	$imprimir = $datos[$field];
+	$campo=$key."_urgente";	
+	$node->{$campo}[$node->language][0]['value'] = $imprimir;	
+	}
+    	
+	
+	node_save($node);
+}
+
+/**
+ * Implementation of hook_cronapi()
+ */
+ // Esta configurando la funcion de más abajo aicia_import_cron para que sea ejecutado por el cron. 
+
+function facturas_urgentes_cronapi($op, $job = NULL) {
+  $items['facturas_urgentes_cron'] = array(
+    'description' => t('facturas'),
+    'rule' => '0 20 * * *', // A cada hora en punto de las 20:00
+  );
+  $items['facturas_urgentes_borrar_cron'] = array(
+    'description' => t('facturas'),
+    'rule' => '0 21 * * *', // A cada hora en punto de las 20:00
+  );
+  return $items;
+}
+
+

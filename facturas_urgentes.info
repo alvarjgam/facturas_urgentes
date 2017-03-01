@@ -1,0 +1,4 @@
+; $Id$
+name = Gestion facturas urgentes
+description = Sirve para llevar un control de las facturas antiguas
+core = 7.x
